@@ -6808,111 +6808,112 @@ load(PickleState *st, UnpicklerObject *self)
     if (Py_SIZE(self->stack))
         Pdata_clear(self->stack, 0);
 
-    /* Convenient macros for the dispatch while-switch loop just below. */
+    /* Macros for the dispatch while-switch loop just below. */
+#include "_pickle_targets.h"
+#define DISPATCH() \
+    do { \
+        if (_Unpickler_Read(self, st, &s, 1) < 0) { \
+            if (PyErr_ExceptionMatches(st->UnpicklingError)) { \
+                PyErr_Format(PyExc_EOFError, "Ran out of input"); \
+            } \
+            return NULL; \
+        } \
+        goto *opcode_targets[(unsigned char)s[0]]; \
+    } while (0);
+
 #define OP(opcode, load_func) \
-    case opcode: if (load_func(st, self) < 0) break; continue;
+    TARGET_##opcode: if (load_func(st, self) < 0) goto TARGET_STOP; DISPATCH();
 
 #define OP_ARG(opcode, load_func, arg) \
-    case opcode: if (load_func(st, self, (arg)) < 0) break; continue;
+    TARGET_##opcode: if (load_func(st, self, (arg)) < 0) goto TARGET_STOP; DISPATCH();
 
-    while (1) {
-        if (_Unpickler_Read(self, st, &s, 1) < 0) {
-            if (PyErr_ExceptionMatches(st->UnpicklingError)) {
-                PyErr_Format(PyExc_EOFError, "Ran out of input");
-            }
-            return NULL;
+    DISPATCH();
+
+// TODO: jump back here if no computed gotos
+
+    OP(NONE, load_none)
+    OP(BININT, load_binint)
+    OP(BININT1, load_binint1)
+    OP(BININT2, load_binint2)
+    OP(INT, load_int)
+    OP(LONG, load_long)
+    OP_ARG(LONG1, load_counted_long, 1)
+    OP_ARG(LONG4, load_counted_long, 4)
+    OP(FLOAT, load_float)
+    OP(BINFLOAT, load_binfloat)
+    OP_ARG(SHORT_BINBYTES, load_counted_binbytes, 1)
+    OP_ARG(BINBYTES, load_counted_binbytes, 4)
+    OP_ARG(BINBYTES8, load_counted_binbytes, 8)
+    OP(BYTEARRAY8, load_counted_bytearray)
+    OP(NEXT_BUFFER, load_next_buffer)
+    OP(READONLY_BUFFER, load_readonly_buffer)
+    OP_ARG(SHORT_BINSTRING, load_counted_binstring, 1)
+    OP_ARG(BINSTRING, load_counted_binstring, 4)
+    OP(STRING, load_string)
+    OP(UNICODE, load_unicode)
+    OP_ARG(SHORT_BINUNICODE, load_counted_binunicode, 1)
+    OP_ARG(BINUNICODE, load_counted_binunicode, 4)
+    OP_ARG(BINUNICODE8, load_counted_binunicode, 8)
+    OP_ARG(EMPTY_TUPLE, load_counted_tuple, 0)
+    OP_ARG(TUPLE1, load_counted_tuple, 1)
+    OP_ARG(TUPLE2, load_counted_tuple, 2)
+    OP_ARG(TUPLE3, load_counted_tuple, 3)
+    OP(TUPLE, load_tuple)
+    OP(EMPTY_LIST, load_empty_list)
+    OP(LIST, load_list)
+    OP(EMPTY_DICT, load_empty_dict)
+    OP(DICT, load_dict)
+    OP(EMPTY_SET, load_empty_set)
+    OP(ADDITEMS, load_additems)
+    OP(FROZENSET, load_frozenset)
+    OP(OBJ, load_obj)
+    OP(INST, load_inst)
+    OP_ARG(NEWOBJ, load_newobj, 0)
+    OP_ARG(NEWOBJ_EX, load_newobj, 1)
+    OP(GLOBAL, load_global)
+    OP(STACK_GLOBAL, load_stack_global)
+    OP(APPEND, load_append)
+    OP(APPENDS, load_appends)
+    OP(BUILD, load_build)
+    OP(DUP, load_dup)
+    OP(BINGET, load_binget)
+    OP(LONG_BINGET, load_long_binget)
+    OP(GET, load_get)
+    OP(MARK, load_mark)
+    OP(BINPUT, load_binput)
+    OP(LONG_BINPUT, load_long_binput)
+    OP(PUT, load_put)
+    OP(MEMOIZE, load_memoize)
+    OP(POP, load_pop)
+    OP(POP_MARK, load_pop_mark)
+    OP(SETITEM, load_setitem)
+    OP(SETITEMS, load_setitems)
+    OP(PERSID, load_persid)
+    OP(BINPERSID, load_binpersid)
+    OP(REDUCE, load_reduce)
+    OP(PROTO, load_proto)
+    OP(FRAME, load_frame)
+    OP_ARG(EXT1, load_extension, 1)
+    OP_ARG(EXT2, load_extension, 2)
+    OP_ARG(EXT4, load_extension, 4)
+    OP_ARG(NEWTRUE, load_bool, Py_True)
+    OP_ARG(NEWFALSE, load_bool, Py_False)
+
+_unknown_opcode:
+    {
+        unsigned char c = (unsigned char) *s;
+        if (0x20 <= c && c <= 0x7e && c != '\'' && c != '\\') {
+            PyErr_Format(st->UnpicklingError,
+                            "invalid load key, '%c'.", c);
         }
-
-        switch ((enum opcode)s[0]) {
-        OP(NONE, load_none)
-        OP(BININT, load_binint)
-        OP(BININT1, load_binint1)
-        OP(BININT2, load_binint2)
-        OP(INT, load_int)
-        OP(LONG, load_long)
-        OP_ARG(LONG1, load_counted_long, 1)
-        OP_ARG(LONG4, load_counted_long, 4)
-        OP(FLOAT, load_float)
-        OP(BINFLOAT, load_binfloat)
-        OP_ARG(SHORT_BINBYTES, load_counted_binbytes, 1)
-        OP_ARG(BINBYTES, load_counted_binbytes, 4)
-        OP_ARG(BINBYTES8, load_counted_binbytes, 8)
-        OP(BYTEARRAY8, load_counted_bytearray)
-        OP(NEXT_BUFFER, load_next_buffer)
-        OP(READONLY_BUFFER, load_readonly_buffer)
-        OP_ARG(SHORT_BINSTRING, load_counted_binstring, 1)
-        OP_ARG(BINSTRING, load_counted_binstring, 4)
-        OP(STRING, load_string)
-        OP(UNICODE, load_unicode)
-        OP_ARG(SHORT_BINUNICODE, load_counted_binunicode, 1)
-        OP_ARG(BINUNICODE, load_counted_binunicode, 4)
-        OP_ARG(BINUNICODE8, load_counted_binunicode, 8)
-        OP_ARG(EMPTY_TUPLE, load_counted_tuple, 0)
-        OP_ARG(TUPLE1, load_counted_tuple, 1)
-        OP_ARG(TUPLE2, load_counted_tuple, 2)
-        OP_ARG(TUPLE3, load_counted_tuple, 3)
-        OP(TUPLE, load_tuple)
-        OP(EMPTY_LIST, load_empty_list)
-        OP(LIST, load_list)
-        OP(EMPTY_DICT, load_empty_dict)
-        OP(DICT, load_dict)
-        OP(EMPTY_SET, load_empty_set)
-        OP(ADDITEMS, load_additems)
-        OP(FROZENSET, load_frozenset)
-        OP(OBJ, load_obj)
-        OP(INST, load_inst)
-        OP_ARG(NEWOBJ, load_newobj, 0)
-        OP_ARG(NEWOBJ_EX, load_newobj, 1)
-        OP(GLOBAL, load_global)
-        OP(STACK_GLOBAL, load_stack_global)
-        OP(APPEND, load_append)
-        OP(APPENDS, load_appends)
-        OP(BUILD, load_build)
-        OP(DUP, load_dup)
-        OP(BINGET, load_binget)
-        OP(LONG_BINGET, load_long_binget)
-        OP(GET, load_get)
-        OP(MARK, load_mark)
-        OP(BINPUT, load_binput)
-        OP(LONG_BINPUT, load_long_binput)
-        OP(PUT, load_put)
-        OP(MEMOIZE, load_memoize)
-        OP(POP, load_pop)
-        OP(POP_MARK, load_pop_mark)
-        OP(SETITEM, load_setitem)
-        OP(SETITEMS, load_setitems)
-        OP(PERSID, load_persid)
-        OP(BINPERSID, load_binpersid)
-        OP(REDUCE, load_reduce)
-        OP(PROTO, load_proto)
-        OP(FRAME, load_frame)
-        OP_ARG(EXT1, load_extension, 1)
-        OP_ARG(EXT2, load_extension, 2)
-        OP_ARG(EXT4, load_extension, 4)
-        OP_ARG(NEWTRUE, load_bool, Py_True)
-        OP_ARG(NEWFALSE, load_bool, Py_False)
-
-        case STOP:
-            break;
-
-        default:
-            {
-                unsigned char c = (unsigned char) *s;
-                if (0x20 <= c && c <= 0x7e && c != '\'' && c != '\\') {
-                    PyErr_Format(st->UnpicklingError,
-                                 "invalid load key, '%c'.", c);
-                }
-                else {
-                    PyErr_Format(st->UnpicklingError,
-                                 "invalid load key, '\\x%02x'.", c);
-                }
-                return NULL;
-            }
+        else {
+            PyErr_Format(st->UnpicklingError,
+                            "invalid load key, '\\x%02x'.", c);
         }
-
-        break;                  /* and we are done! */
+        return NULL;
     }
 
+TARGET_STOP:
     if (PyErr_Occurred()) {
         return NULL;
     }
